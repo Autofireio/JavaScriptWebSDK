@@ -1,3 +1,11 @@
+/**
+ * Autofire | Game Analytics | http://autofire.io
+ * JavaScript Web SDK
+ * @version v0.4 - 2016-04-22
+ * @link https://github.com/autofireio/JavaScriptWebSDK
+ * @author jkourou <john@autofire.io>
+ * @license MIT License, http://www.opensource.org/licenses/MIT
+ */
 var Autofire = typeof Autofire != 'undefined' ? Autofire : {};
 
 Autofire._helpers = {
@@ -116,7 +124,7 @@ Autofire._helpers = {
 		xhr.setRequestHeader('X-Autofire-Player-Id', cachedSessionPart.uuid);
 		xhr.onload = function(e) {
 			if (xhr.readyState === 4) {
-				if (xhr.status === 200 || xhr.status === 400) { // 400 is malformed event. Remove it as sent.
+				if (xhr.status === 200 || xhr.status === 400 || xhr.status === 404) {
 					Autofire._helpers.persistenceDelete(cachedSessionPartsKeys[0]);
 					cachedSessionPartsKeys.shift();
 					if (cachedSessionPartsKeys.length > 0)
