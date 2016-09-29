@@ -11,10 +11,12 @@
 	- [Fire your first event](#firstEvent)
 	- [And now?](#andNow)
 - [Usage](#usage)
-	- [Start Session](#start) 
+	- [Initialize](#init)
 	- [Progress Event](#progress)
 	- [Monetize Event](#monetize)
-	- [Finish Session](#finish)
+	- [Resource Event](#resource)
+	- [Action Event](#action)
+	- [Flush events](#flush)
 - [Assumptions](#assumptions)
 
 <a name="getStarted"></a>
@@ -39,18 +41,14 @@ To send your first event just follow these simple steps:
 
 1. Download the JavaScript Web SDK.
 2. Include it in you project with a simple html script tag.
-3. Find your Game Id through the games menu in the Autofire Dashboard.
-4. Fire the startSession event immediately after your game loads, using your game's Id and Version.
-5. Fire the finishSession event when your game ends or the player quits.
+3. Find your `Game Id` through the games menu in the Autofire Dashboard.
+4. Fire the `init` immediately after your game loads, using your `Game Id` and `Game Version`.
 
-These two lines of code are all you need to get started:
+This line of code is all you need to get started:
 
 ```javascript
-// fire the startSession immediately after your game loads
-Autofire.startSession(your-game-id, your-game-version);
-
-// fire the finishSession event when your game ends or the player quits
-Autofire.finishSession();
+// fire the init immediately after your game loads
+Autofire.init(your-game-id, your-game-version);
 ```
 
 Your game is now bootstrapped and all the basic telemetry will start working. Log into your Autofire Dashboard and start optimizing!
@@ -61,239 +59,229 @@ Your game is now bootstrapped and all the basic telemetry will start working. Lo
 Autofire is a simple service to use. All you have to do is add the event you need in the flow of your game. Below is a basic example with the following assumptions:
 
 - your Game Id is `this-is-my-game-id`
-- your game version is `v3.4-beta`
-- your game uses levels to progress and has 2 main levels, 2 boss levels and 1  special level.
-- your game has in-app purchases with 2 swords and 2 power ups.
+- your Game Version is `v3.4-beta`
+- your game uses levels to measure progress.
+- your game offers a sword as an in-app purchase.
 - the events you see in the example are further explained later in the documentation, but for the purposes of this example their usage is self explanatory.
 
 Basic example:
 
 ```javascript
 // player opens your game
-// you should call the startSession immediately after
-// this will ensure that the player and session are counted
-// this is all you need to do in your code to get all your basic telemetry
-Autofire.startSession('this-is-my-game-id', 'v3.4-beta');
+// you should call init() immediately after
+// this is all you need to do to get all your basic telemetry
+Autofire.init('this-is-my-game-id', 'v3.4-beta');
 
 // player starts a new game and enters a new level
-// you should call the progressWithLevel
-Autofire.progressWithLevel('level-1');
+// you should call the progress
+Autofire.progress('level-1', 0);
 
 // player enters the boss stage of level 1
-Autofire.progressWithLevel('level-1-boss');
+Autofire.action('level-1-boss');
 
 // player wins the boss
-// you want to track the win and the score
-Autofire.progressWithLevelAndScore('level-1-completed', 3421);
+Autofire.action('level-1-completed');
 
 // the boss drops a special item as a reward
-// if the player picks up the item
-Autofire.monetizeWithItem('sword-boss-1');
+// and the player picks it up
+Autofire.resource('sword-boss', 1);
 
 // player goes to level 2
-Autofire.progressWithLevel('level-2');
+Autofire.progress('level-2', 18639);
 
-// player discovers the special stage of level 2
-// you want to track both the level and the score
-Autofire.progressWithLevelAndScore('level-2-special', 5734);
+// player discovers the special stage
+Autofire.progress('level-special', 22800);
 
-// in the special stage a sword is found
-Autofire.monetizeWithItem('sword-special-2');
+// in the special stage a sword is offered for in-app purchase
+// and the player buys it
+Autofire.monetize('sword-special', 400);
 
-// because finding the sword is important to the progress of your game
-// you want to log it as a simple progress
-Autofire.progress();
+// because having this sword is important to the progress of your game
+// you want to track it
+Autofire.resource('sword-special', 1);
 
-// also you offer 2 power ups with a sale because of the special stage
-// the player decides to buy only one, so you log it with its cost
-Autofire.monetizeWithItemAndVC('life-potion', 3.45);
+// player returns to level 2 from the special stage
+Autofire.progress('level-2', 25300);
 
-// player advances to level 2
-Autofire.progressWithLevel('level-2');
+// player buys with game gold a potion
+Autofire.resource('gold-coins', -300);
+Autofire.resource('health-potion', 1);
 
 // player enters the boss stage of level 2
-Autofire.progressWithLevel('level-2-boss');
+Autofire.action('level-2-boss');
+
+// player uses the potion
+Autofire.resource('health-potion', -1);
 
 // player loses and is redirected in the main menu
-Autofire.progressWithLevel('menu');
-
-// player quits your game
-Autofire.finishSession();
+Autofire.action('game-over');
 ```
 
 <a name="usage"></a>
 ## Usage
 
-<a name="start"></a>
-### Start Session
+<a name="init"></a>
+### Initialize
 
-To start an Autofire session with our service (so that you can later send events), just call **once** the `startSession` method. Doing that is very simple and requires the following line of code:
-
-	Autofire.startSession(your-game-id, your-game-version);
-	
-- `your-game-id` (string): This is your Game Id (as shown in your Autofire Dashboard in the games' menu)
-- `your-game-version` (string): This is your game's version.
-- retuns `boolean`
-
-Example:
+To initialize the Autofire SDK just call **once** at the beginning of your game the `init` method. Doing this is very simple and requires the following line of code:
 
 ```javascript	
-Autofire.startSession('29bc647056ee11e582810b3fc33376d1', 'v2.3-alpha');
+Autofire.init(your-game-id, your-game-version, player-id);
 ```
 
-Based on the type of your game, `startSession` may need to be called more than once (as pages refresh), depending on your definition of a session. See [assumptions](#assumptions) below for more info on this.
+- `your-game-id` (string): This is your game's id (as shown in the games menu of your Autofire Dashboard)
+- `your-game-version` (string): This is your game's version.
+- `player-id` (string, optional): While the SDK will generate and handle the player id per device/browser basis, you may want to provide your own specific player id.
+- returns `boolean`
+
+**Example:**
+
+```javascript	
+// init
+Autofire.init('29bc647056ee11e582810b3fc33376d1', 'v2.3-alpha');
+```
 
 <a name="progress"></a>
 ### Progress Event
 
-A `progress` event may be called whenever an action occurs in your game that you would define it as progress. While this action may cause the game and player to progress (structurally) in your game, it doesn't mean that the event is always positive for the player. For example a `progress` event may be changing level, or losing a life.
+A `progress` event may be called whenever an action occurs in your game that you would define it as progress. While this action may cause the game and player to progress (structurally) in your game, it doesn't mean that the event is always positive for the player. For example a `progress` event may be called when changing game level, even if this game level is lower than the current one.
 
-Definitions:
+**Definition:**
 
 ```javascript
-// simple progress
-Autofire.progress();
-
-// with level
-Autofire.progressWithLevel(level);
-	
-// with score
-Autofire.progressWithScore(score);
-	
-// with level and score
-Autofire.progressWithLevelAndScore(level, score);
+// progress
+Autofire.progress(level, score);
 ```
 
-- `level` (string, optional): This is the level that you are tracking with this `progress` event. It does not need to be an actual game level, but more like something that you define as a level change. For example it could mean that the game difficulty changed.
-- `score` (positive int, optional): This is a positive integer representing the points the player gained when the `progress` event fired.
-- retuns `boolean`
+- `level` (string): This is the name of the level the progress occurred in your game. It can be a new game level, a game difficulty change or a new tier. Generally it is the term that semantically measures progress in your game. 
+- `score` (positive int): This is a positive integer representing the current points (actual score, XPs, difficulty modifier etc) the player has the moment the `progress` event fires.
+- returns `boolean`
 
-There are four ways to call the `progress` event.
-
-**Undefined progress**
-
-The event is called with no arguments. This is usefull for counting your `progress` events, regardless for what reason they fired.
+**Example:**
 
 ```javascript
-Autofire.progress();
-```
-
-**Level based progress**
-
-```javascript
-Autofire.progressWithLevel('level-2-special');
-```
-
-**Score based progress**
-
-```javascript
-Autofire.progressWithScore(25398);
-```
-
-**Level and Score based progress**
-
-```javascript
-Autofire.progressWithLevelAndScore('level-2-special', 25398);
+// player enters level 2 with score 25398
+Autofire.progress('level-2', 25398);
 ```
 
 <a name="monetize"></a>
 ### Monetize Event
 
-A `monetize` event may be called whenever an action occurs in your game that you would define it as monetization.
+A `monetize` event may be called whenever an action occurs in your game that you would define it as monetization. That is an action that actually translates to real gain or loss of profit.
 
-Definitions:
-
-```javascript
-// simple monetize
-Autofire.monetize();
-	
-// with item
-Autofire.monetizeWithItem(item);
-	
-// with virtual currency
-Autofire.monetizeWithVC(vc);
-
-// with item and virtual currency
-Autofire.monetizeWithItemAndVC(item, vc);
-```
-
-- `item` (string, optional): This is the item that was exchanged during this `monetize` event. This does not have to be a specific item, but could also be a service, a bonus or any other valuable the `monetize` was fired upon.
-- `vc` (positive int, optional): This is the virtual cost of the monetize event. The `vc` is a positive integer representing the cost of the `monetize` event.
-- retuns `boolean`
-
-There are four ways to call the `monetize` event.
-
-**Undefined monetize**
-
-The event is called with no arguments. This is usefull for counting your `monetize` events, regardless for what reason they fired.
+**Definition:**
 
 ```javascript
-Autofire.monetize();
+// monetize
+Autofire.monetize(item, ac, qty);
 ```
 
-**Item based monetize**
+- `item` (string): This is what was exchanged during this `monetize` event. This does not have to be a specific item, but could also be a service, a bonus or any other valuable the `monetize` was fired upon.
+- `ac` (int): The `Autofire Credits` is the normalized **total** cost (regrdless of quantity) of the monetize event. The `ac` is an integer representing the gain or loss of profit from the `monetize` event.
+- `qty` (positive int, optional): This is the quantity of the items that were monetized. If none is given, default is 1.
+- returns `boolean`
+
+**Example:**
 
 ```javascript
-Autofire.monetizeWithItem('star-fuel-combo');
+// player makes an in-app purchase
+// 2 items for a total cost of 400, i.e. 200 each
+Autofire.monetize('star-fuel-combo', 400, 2);
+
+// player gets a refund
+Autofire.monetize('old-star-fuel-combo', -200);
 ```
 
-**Virtual Currency based monetize**
+<a name="resource"></a>
+### Resource Event
+
+A `resource` event may be called whenever a game resource is given or taken from the player. This can be an inventory item, gold pieces, a skill, a special bonus etc.
+
+**Definition:**
 
 ```javascript
-Autofire.monetizeWithVC(428);
+// resource
+Autofire.resource(name, qty);
 ```
 
-**Item and Virtual Currency based progress**
+- `name` (string): This is the name of the resource.
+- `qty` (int): This is quantity of the resource.
+- returns `boolean`
+
+**Example:**
 
 ```javascript
-Autofire.monetizeWithItemAndVC('star-fuel-combo', 428);
+// player receives a sword
+Autofire.resource('Excalibur', 1);
+
+// player buys something with in-game gold
+Autofire.resource('gold-coins', -1000);
 ```
 
-<a name="finish"></a>
-###Finish Session
+<a name="action"></a>
+### Action Event
 
-The `finishSession` event is called to close your started session. This event should always be called after a `startSession` event has already been successfully called. For further discussion on the `startSession` and `finishSession` events check the [assumptions](#assumptions) below.
+An `action` event may be called whenever a player performs a game action that you want to track. These are generally actions that affect how the game progresses or how the player reacts to specific stimulae.
+
+**Definition:**
+
+```javascript
+// action
+Autofire.action(what);
+```
+
+- `what` (string): This is the name of the action.
+- returns `boolean`
+
+**Example:**
+
+```javascript
+// player encounters level 1 boss
+Autofire.action('level-1-boss');
+
+// player takes path A, instead of path B on level 2
+Autofire.action('level-2-path-A');
+```
+
+<a name="flush"></a>
+###Flush events
+
+The `flush` method is called if you want to send all the events stored up until that moment, regardless of other factors. The most common use of `flush` is when the player quits the game. See [assumptions](#assumptions) below for more details on how events are stored and send.
+
+**Definition:**
 
 ```javascript	
-Autofire.finishSession();
+Autofire.flush();
 ```
 
-- retuns `boolean`
+- returns `boolean`
 
 <a name="assumptions"></a>
 ##Assumptions
 
-When the `startSession` event is fired, a session is started. In order to properly keep track of the session it is important to be clearly defined when a session starts and when it finishes.
+**1) Events are grouped and send as batches**
 
-**1) If a started session is not 'closed' and the next event we call is:**
+As the game progresses and events are fired they are not immediately sent. Events are grouped and send when a minimum number of stored events are reached. This conserves battery and saves bandwidth. Also there is a maximum time interval allowed between events. This means that if the time distance between the event that just fired from the one last stored is bigger than an allowed time span, all stored events are sent immediately, independent of their total number.
 
-- `startSession`: Nothing happens. You should finish the active session first before initializing a new one.
-- `finishSession`: Session is closed normally.
-- `progress`: Executes normally.
-- `monetize`: Executes normally.
+**2) Storage**
 
-**2) If a started session is not properly 'closed' and the browser window is refreshed and the next event we call is:**
+All events are saved in a storage mechanism. The storage is used to cache events not ready to be sent. Each time an event is fired, being `progress`, `monetize`, `resource` or `action` the program will check if specific requirements are met (see 1 above) and if yes, it will try to send any cached events, starting from the oldest first.
 
-- `startSession`: Tries to restore a previous running session from persistence. If an initialized session exists and a time constraint returns true, the session is restored. If no session exists a new one is created.
-- `finishSession`: Tries to restore previous running session from persistence. If an initialized session exists and a time constraint returns true, the session is restored. If no session exists it exits.
-- `progress`: Tries to restore previous running session from persistence. If an initialized session exists and a time constraint returns true, the session is restored. If no session exists it exits.
-- `monetize`: Tries to restore previous running session from persistence. If an initialized session exists and a time constraint returns true, the session is restored. If no session exists it exits.
+**3) Cached batches**
 
-**3) Events are grouped and send as batches**
+While events not sent are cached in batches, this cannot go on for an unlimited amount of batches. Each time the program tries to send the cached events, it first checks the limit of allowed cached batches. If this limit is reached, any excess batches, beggining from the oldest, are removed.
 
-As the game progresses and events are fired they are not immediately sent. Events are grouped and sent when a minimum number of stored events are reached. This conserves battery and saves bandwidth. Also there is a maximum time interval allowed between events. This means that if the time distance between the event that just fired from the one last stored is bigger than an allowed time span, all stored events are sent immediately, independent of their total number.
+**4) Initilization and player id**
 
-**4) Storage**
-
-All events and the sessions are saved in a storage mechanism. The storage is used to cache events not ready to be sent, or sessions that failed to finish (e.g. due to a crash or a browser window refresh or close). Each time an event is fired (being `startSession`, `finishSession`, `progress`, `monetize`) the program will try to send any cached events and sessions, starting from the oldest first. As per event grouping (see 3), sessions are also checked before sent against their age and a maximum allowed number of stored sessions. All sessions that are old and/or excess of the allowed limit are deleted, starting from the oldest stored.
+Player Id's are generated and handled by the SDK per device/browser basis. In the case of the JavaScript SDK an Id will be generated during the initialization process and stored for any future use. Since the JavaScript SDK will run in a browser environment, multiple browsers in the same system will produce different player id's as well as in different devices. In this case you may want to provide your own player id based for example on a hash generated from their registration email, thus ensuring consistency of player data across all devices and browsers the player uses.
 
 **5) Connection not found**
 
 If there is problem connecting to the service while trying to send events, the program will pause sending the events and will try to resume the next time an event is fired. Each event is send after the previous one was successfully delivered.
 
-**6) Limits and Thresholds**
+**6) Limits and thresholds**
 
-All limits set in the current code are for testing. This refers to all maximum allowed numbers (like events and sessions) and all time periods (session time to live and event maximum interval).
+All limits set in the current code are for testing. This refers to all maximum allowed numbers (like events and parts) and all time periods (event maximum interval).
 
 ---
 

@@ -1,7 +1,7 @@
 /**
  * Autofire | Game Analytics | http://autofire.io
  * JavaScript Web SDK
- * @version v0.4 - 2016-04-22
+ * @version v0.4 - 2016-09-29
  * @link https://github.com/autofireio/JavaScriptWebSDK
  * @author jkourou <john@autofire.io>
  * @license MIT License, http://www.opensource.org/licenses/MIT
@@ -33,13 +33,13 @@ Autofire._helpers = {
 
 		if (this.lsExists() === true) {
 			if (prefix) {
-				var cachedSessionPartsKeys = [];
+				var cachedBatchesKeys = [];
 				for (var i = 0; i < localStorage.length; i++) {
 					if (localStorage.key(i).indexOf(key) != -1) {
-						cachedSessionPartsKeys.push(localStorage.key(i));
+						cachedBatchesKeys.push(localStorage.key(i));
 					}
 				}
-				return cachedSessionPartsKeys;
+				return cachedBatchesKeys;
 			} else if (localStorage.getItem(key) !== null)
 				return localStorage.getItem(key);
 			else
@@ -47,11 +47,11 @@ Autofire._helpers = {
 		} else {
 			if (prefix) {
 				var cookies = document.cookie.split(';');
-				var cachedSessionPartsKeys = [];
+				var cachedBatchesKeys = [];
 				for(var i = 0; i < cookies.length; i++) {
 					if (cookies[i].indexOf(key) != -1) {
 						var theKey = cookies[i].split('=');
-						cachedSessionPartsKeys.push(theKey);
+						cachedBatchesKeys.push(theKey);
 					}
 				}
 				document.cookie = cookies.join(';');
@@ -62,9 +62,13 @@ Autofire._helpers = {
 		}
 	},
 
-	persistenceWrite: function(key, data) {
+	persistenceWrite: function(key, data, isJson) {
+		var isJson = typeof isJson !== 'undefined' ? isJson : true;
+
 		try {
-			data = JSON.stringify(data);
+			if (isJson)
+				data = JSON.stringify(data);
+
 			if (this.lsExists() === true)
 				localStorage.setItem(key, data);
 			else
@@ -82,171 +86,81 @@ Autofire._helpers = {
 			document.cookie = key + '=;expires=Thu, 01 Jan 1970 00:00:01 GMT;';
 	},
 
-	checkInitializedSession: function(token, version) {
-		var token = typeof token !== 'undefined' ? token : false;
-		var version = typeof version !== 'undefined' ? version : false;
-		var isInitializedStoredTTL = 600;
-		var isInitializedStored = JSON.parse(this.persistenceRead('autofire-isInitialized-stored'));
-		if (Autofire._session.currentState.isInitialized) // initialized: during this run
-			return true;
-		else if (isInitializedStored && this.getCurrentTimestamp() - isInitializedStored.startedAtUTC <= isInitializedStoredTTL) // initialized: saved
-			return isInitializedStored;
-		else if (token && version) // initialized: false, create new session
-			return {
-				token			: token,
-				version 		: version,
-				sessionId 		: this.createGUID(),
-				uuid 			: this.getUUID(),
-				startedAtUTC 	: this.getCurrentTimestamp(),
-				part 			: 1
-			}
-		else
-			return false; // initialized: false, do nothing
-	},
-
-	sendSessionParts: function(cachedSessionPartsKeys) {
-		var cachedSessionPart = JSON.parse(this.persistenceRead(cachedSessionPartsKeys[0]));
+	sendBucket: function(cachedBatchesKeys) {
+		var cachedBatch = JSON.parse(this.persistenceRead(cachedBatchesKeys[0]));
 		var url = Autofire._settings.serviceURL;
 		var data = {
-			events: [{
-				session 	: cachedSessionPart.sessionPart.session,
-				game		: cachedSessionPart.sessionPart.game,
-				device		: cachedSessionPart.sessionPart.device,
-				player		: cachedSessionPart.sessionPart.player,
-				dataPoints	: cachedSessionPart.sessionPart.dataPoints
-			}]
+			header 	: cachedBatch.batch.header,
+			events	: cachedBatch.batch.events
 		}
 		var requestBody = JSON.stringify(data);
 		var xhr = new XMLHttpRequest();
 		xhr.open('POST', url, true);
 		xhr.setRequestHeader('Content-Type', 'application/json');
-		xhr.setRequestHeader('X-Autofire-Game-Id', cachedSessionPart.token);
-		xhr.setRequestHeader('X-Autofire-Player-Id', cachedSessionPart.uuid);
+		xhr.setRequestHeader('X-Autofire-Game-Id', cachedBatch.gameId);
+		xhr.setRequestHeader('X-Autofire-Player-Id', cachedBatch.uuid);
 		xhr.onload = function(e) {
 			if (xhr.readyState === 4) {
-				if (xhr.status === 200 || xhr.status === 400 || xhr.status === 404) {
-					Autofire._helpers.persistenceDelete(cachedSessionPartsKeys[0]);
-					cachedSessionPartsKeys.shift();
-					if (cachedSessionPartsKeys.length > 0)
-						Autofire._helpers.sendSessionParts(cachedSessionPartsKeys);
+				if (xhr.status === 200 || xhr.status === 400 || xhr.status === 404) { // 400 is malformed event. 404 Game Id not found. Remove it as sent.
+					Autofire._helpers.persistenceDelete(cachedBatchesKeys[0]);
+					cachedBatchesKeys.shift();
+					if (cachedBatchesKeys.length > 0)
+						Autofire._helpers.sendBucket(cachedBatchesKeys);
 					else
-						Autofire._session.sending = false;
+						Autofire._core.sending = false;
 				} else {
 					console.error(xhr.statusText);
-					Autofire._session.sending = false;
+					Autofire._core.sending = false;
 				}
 			}
 		};
 		xhr.onerror = function(e) {
 			console.error(xhr.statusText);
-			Autofire._session.sending = false;
+			Autofire._core.sending = false;
 		};
-		Autofire._session.sending = true;
+		Autofire._core.sending = true;
 		xhr.send(requestBody);
 	},
 
-	prepareSessionParts: function() {
-		var maxSessions = 3;
-		var ttl = 600;
-		var cachedSessionPartsKeys = this.persistenceRead('autofire-cached', true);
-		var cachedSessionsKeys = [];
-
-		function removeKey(key) {
-			var key = typeof key !== 'undefined' ? key : false;
-			return function(element) {
-				if (key) {
-					if (element.indexOf(key) === -1)
-						return element;
-					else
-						Autofire._helpers.persistenceDelete(element);
-				} else {
-					var sessionPartDetails = element.split('_');
-					if (Autofire._helpers.getCurrentTimestamp() - sessionPartDetails[1] > ttl)
-						Autofire._helpers.persistenceDelete(element);
-					else
-						return element;
-				}
-			}
-		}
-
-		if (cachedSessionPartsKeys && cachedSessionPartsKeys.length > 0) {
-			// expired sessions
-			cachedSessionPartsKeys = cachedSessionPartsKeys.filter(removeKey);
-
-			// build help array to count sessions
-			for (var i = 0; i < cachedSessionPartsKeys.length; i++) {
-				var sessionPartDetails = cachedSessionPartsKeys[i].split('_');
-				if (cachedSessionsKeys.indexOf(sessionPartDetails[1] + '_' + sessionPartDetails[2]) === -1)
-					cachedSessionsKeys.push(sessionPartDetails[1] + '_' + sessionPartDetails[2]);
-			}
-
-			cachedSessionPartsKeys.sort();
-			cachedSessionsKeys.sort();
-
-			// maximum allowed sessions
-			var noOfSessions = cachedSessionsKeys.length;
-			if (noOfSessions > maxSessions) {
-				var cachedSessionsKeysToRemove = cachedSessionsKeys.slice(0, noOfSessions - maxSessions);
-				for (var i = 0; i < cachedSessionsKeysToRemove.length; i++)
-					cachedSessionPartsKeys = cachedSessionPartsKeys.filter(removeKey(cachedSessionsKeysToRemove[i]));
-			}
-
-			if (cachedSessionPartsKeys.length > 0)
-				this.sendSessionParts(cachedSessionPartsKeys);
-		}
-	},
-
-	checkSessionPart: function(force) {
+	checkBatch: function(force) {
 		var force = typeof force !== 'undefined' ? force : false;
+		var maxCachedBatches = 10;
 		var maxEvents = 3;
 		var interval = 600;
 
-		if (force ||
-			Autofire._session.currentState.sessionPart.dataPoints.length >= maxEvents ||
-			this.getCurrentTimestamp - Autofire._session.currentState.sessionPart.dataPoints[Autofire._session.currentState.sessionPart.dataPoints.length - 1][1] > interval) {
+		Autofire._core.currentState.totalEvents += 1;
 
-			if (force) {
-				var savedCurrentSession = JSON.parse(this.persistenceRead('autofire-current-session-part'));
-				if (savedCurrentSession)
-					this.persistenceWrite(
-						'autofire-cached_' +
-						savedCurrentSession.startedAtUTC + '_' +
-						savedCurrentSession.sessionPart.session[0] + '_' +
-						'part' + savedCurrentSession.sessionPart.session[1].part
-						,
-						savedCurrentSession
-					);
-			} else {
+		if (
+				force ||
+				Autofire._core.currentState.batch.events.length >= maxEvents ||
+				this.getCurrentTimestamp(false) -
+				Math.floor(Date.parse(Autofire._core.currentState.batch.events[Autofire._core.currentState.batch.events.length - 1][1]) / 1000) >
+				interval
+			) {
+
+			var storedCurrentBatch = JSON.parse(this.persistenceRead('autofire-current-batch'));
+			if (storedCurrentBatch && storedCurrentBatch.batch.events.length > 0)
 				this.persistenceWrite(
-					'autofire-cached_' +
-					Autofire._session.currentState.startedAtUTC + '_' +
-					Autofire._session.currentState.sessionPart.session[0] + '_' +
-					'part' +  Autofire._session.currentState.sessionPart.session[1].part
-					,
-					 Autofire._session.currentState
+					'autofire-cached_' + 'batch_' + this.getCurrentTimestamp(false),
+					storedCurrentBatch
 				);
+			if (Autofire._core.currentState.batch.header) // if the header hasn't been initialized (first load of init)
+				Autofire._core.currentState.batch.header[1].startLvl = Autofire._core.currentLvl; 	// last level from previous batch
+			Autofire._core.currentState.batch.events = [];								 			// empty the events
+			this.persistenceWrite('autofire-current-batch', Autofire._core.currentState); 			// save the new current state
+
+			// if the cached batches are more than the maximum allowed
+			var cachedBatchesKeys = this.persistenceRead('autofire-cached', true);
+			cachedBatchesKeys.sort();
+			if (cachedBatchesKeys.length > maxCachedBatches) {
+				var oldestbatch = cachedBatchesKeys.shift();
+				this.persistenceDelete(oldestbatch);
 			}
 
-			if (!force) {
-				var partNo = parseInt(Autofire._session.currentState.sessionPart.session[1].part) + 1;
-				Autofire._session.currentState.sessionPart.session[1].part = partNo.toString();
-				Autofire._session.currentState.sessionPart.dataPoints = [];
-				this.persistenceWrite('autofire-current-session-part', Autofire._session.currentState);
-				this.persistenceWrite('autofire-isInitialized-stored',	{
-						token			: Autofire._session.currentState.token,
-						version 		: Autofire._session.currentState.sessionPart.game.ver,
-						sessionId 		: Autofire._session.currentState.sessionPart.session[0],
-						uuid 			: Autofire._session.currentState.uuid,
-						startedAtUTC	: Autofire._session.currentState.startedAtUTC,
-						part 			: partNo + 1
-					}
-				);
-			}
-
-			if (Autofire._session.sending)
+			if (Autofire._core.sending)
 				return false;
-			else
-				this.prepareSessionParts();
+			else if (cachedBatchesKeys && cachedBatchesKeys.length > 0)
+				this.sendBucket(cachedBatchesKeys);
 		}
 	},
 
@@ -275,19 +189,33 @@ Autofire._helpers = {
 		return window.navigator.platform;
 	},
 
-	getTimezone: function() {
-		return (new Date().getTimezoneOffset() / 60).toString();
-	},
-
 	getLocale: function() {
 		return window.navigator.language;
 	},
 
-	getCurrentTimestamp: function() {
-		if (!Date.now) {
-			Date.now = function() { return new Date().getTime(); }
+	getCurrentTimestamp: function(iso) {
+		if (iso) { // iso date with timezone
+			var now = new Date();
+			var tzo = -now.getTimezoneOffset();
+			var dif = tzo >= 0 ? '+' : '-';
+			var pad = function(num) {
+				var norm = Math.abs(Math.floor(num));
+				return (norm < 10 ? '0' : '') + norm;
+			};
+
+			return now.getFullYear()
+				+ '-' + pad(now.getMonth()+1)
+				+ '-' + pad(now.getDate())
+				+ 'T' + pad(now.getHours())
+				+ ':' + pad(now.getMinutes())
+				+ ':' + pad(now.getSeconds())
+				+ dif + pad(tzo / 60)
+				+ ':' + pad(tzo % 60);
+		} else { // seconds
+			if (!Date.now)
+				Date.now = function() { return new Date().getTime(); }
+			return Math.floor(Date.now() / 1000);
 		}
-		return Math.floor(Date.now() / 1000);
 	},
 
 	createGUID: function() {
@@ -308,10 +236,7 @@ Autofire._helpers = {
 			uuid = this.persistenceRead('autofire-uuid');
 		} else {
 			uuid = this.createGUID();
-			if (this.lsExists() === true)
-				localStorage.setItem('autofire-uuid', uuid);
-			else
-				document.cookie = 'autofire-uuid' + '=' + uuid;
+			this.persistenceWrite('autofire-uuid', uuid, false);
 		}
 
 		return uuid;
@@ -323,266 +248,139 @@ Autofire._settings = {
 	autofireVersion	: '0.4',
 	os				: Autofire._helpers.getOs(),
 	model			: Autofire._helpers.getModel(),
-	timeZone		: Autofire._helpers.getTimezone(),
 	locale			: Autofire._helpers.getLocale(),
-	serviceURL		: 'https://service.autofire.io/v1/games/players/datapoints'
+	//serviceURL	: 'https://service.autofire.io/v1/games/players/datapoints'
+	serviceURL		: 'http://putsreq.com/Foy3mZhbjMD7mcXZXwjx'
 }
 
-Autofire._session = {
+Autofire._core = {
 
-	// HEADERS
-	header: function(name, nominalDict) {
-		return [name, nominalDict];
-	},
-
-	playerHeader: function(tags, nominalDict) {
+	// HEADER
+	header: function(tags, nominalDict) {
 		return [tags, nominalDict];
 	},
 
-	device: function(platform, os, model, timeZone) {
-		return this.header(platform, {os: os, model: model, tz: timeZone});
-	},
-
-	player: function(tags, locale) {
-		return this.playerHeader(tags, {locale: locale});
-	},
-
-	game: function(version, autofireVersion) {
-		return {ver: version, autofireVer: autofireVersion};
-	},
-
-	session: function(id, startedAtUTC, part) {
-		return this.header(id, {started: startedAtUTC, part: part});
-	},
-
 	// EVENTS
-	event: function(name, timestamp, tags, nominalDict, ordinalDict, scaleDict) {
-		return [name, timestamp, tags, nominalDict, ordinalDict, scaleDict];
-	},
-
-	start: function(timestamp) {
-		return this.event('STARTED', timestamp, [], {}, {}, {});
-	},
-
-	end: function(timestamp, duration) {
-		return this.event('ENDED_FINI', timestamp, [], {}, {duration: duration}, {});
+	event: function(name, timestamp, nominalDict, ordinalDict, scaleDict) {
+		return [name, timestamp, nominalDict, ordinalDict, scaleDict];
 	},
 
 	progress: function(level, score) {
-		var level = typeof level !== 'undefined' ? level : false;
-		var score = typeof score !== 'undefined' ? score : false;
-		var timestamp = Autofire._helpers.getCurrentTimestamp();
-		if (level !== false && score !== false)
-			return this.event('PROGRESSED', timestamp, [], {level: level}, {score: score}, {});
-		else if (level !== false)
-			return this.event('PROGRESSED', timestamp, [], {level: level}, {}, {});
-		else if (score !== false)
-			return this.event('PROGRESSED', timestamp, [], {}, {score: score}, {});
-		else
-			return this.event('PROGRESSED', timestamp, [], {}, {}, {});
+		var timestamp = Autofire._helpers.getCurrentTimestamp(true);
+		return this.event('PROGRESS', timestamp, {level: level}, {score: score}, {});
 	},
 
-	monetize: function(item, vc) {
-		var item = typeof item !== 'undefined' ? item : false;
-		var vc = typeof vc !== 'undefined' ? vc : false;
-		var timestamp = Autofire._helpers.getCurrentTimestamp();
-		if (item !== false && vc !== false)
-			return this.event('MONETIZED', timestamp, [], {item: item}, {vc: vc}, {});
-		else if (item !== false)
-			return this.event('MONETIZED', timestamp, [], {item: item}, {}, {});
-		else if (vc !== false)
-			return this.event('MONETIZED', timestamp, [], {}, {vc: vc}, {});
-		else
-			return this.event('MONETIZED', timestamp, [], {}, {}, {});
+	monetize: function(name, ac, qty) {
+		var timestamp = Autofire._helpers.getCurrentTimestamp(true);
+		return this.event('MONETIZE', timestamp, {name: name}, {ac: ac, qty: qty}, {});
 	},
 
-	makeHeaders: function(isInitialized) {
-		Autofire._session.currentState.sessionPart.device = Autofire._session.device(
-			Autofire._settings.platform,
-			Autofire._settings.os,
-			Autofire._settings.model,
-			Autofire._settings.timeZone
-		);
+	resource: function(name, qty) {
+		var timestamp = Autofire._helpers.getCurrentTimestamp(true);
+		return this.event('RESOURCE', timestamp, {name: name}, {qty: qty}, {});
+	},
 
-		Autofire._session.currentState.sessionPart.player = Autofire._session.player(
-			[],
-			Autofire._settings.locale
-		);
-
-		Autofire._session.currentState.sessionPart.game = Autofire._session.game(
-			isInitialized.version,
-			Autofire._settings.autofireVersion
-		);
-
-		Autofire._session.currentState.token = isInitialized.token;
-		Autofire._session.currentState.uuid = isInitialized.uuid;
-		Autofire._session.currentState.startedAtUTC = isInitialized.startedAtUTC;
-
-		Autofire._session.currentState.sessionPart.session = Autofire._session.session(
-			isInitialized.sessionId,
-			Autofire._session.currentState.startedAtUTC.toString(),
-			isInitialized.part.toString()
-		);
-
-		isInitialized.part += 1;
-		Autofire._helpers.persistenceWrite('autofire-isInitialized-stored', isInitialized);
-		Autofire._session.currentState.isInitialized = true;
+	action: function(what) {
+		var timestamp = Autofire._helpers.getCurrentTimestamp(true);
+		return this.event('ACTION', timestamp, {what: what}, {}, {});
 	},
 
 	sending: false,
 
+	currentLvl: null,
+
 	currentState: {
-		token			: 'the_game',
+		gameId			: 'the_game',
 		uuid 			: 'the_player',
 		isInitialized 	: false,
-		startedAtUTC 	: false,
-		sessionPart 	: {
-			dataPoints 		: []
+		totalEvents		: 0,
+		batch 			: {
+			header 		: null,
+			events 		: []
 		}
 	}
 }
 
-// START
-Autofire.startSession = function(token, version) {
-	var isInitializedState = Autofire._helpers.checkInitializedSession(token, version);
-	if (isInitializedState === true) // session already initialized in current run
+// ΙΝΙΤ
+Autofire.init = function(gameId, version, playerId) {
+	if (Autofire._core.currentState.isInitialized)
 		return false;
 
-	// if previous session data exists send them
-	Autofire._helpers.checkSessionPart(true);
+	var playerId = typeof playerId != 'undefined' ? playerId : false;
 
-	// make headers and save session state
-	Autofire._session.makeHeaders(isInitializedState);
+	// if previous data exists send them
+	Autofire._helpers.checkBatch(true);
 
-	// send STARTED event
-	Autofire._session.currentState.sessionPart.dataPoints.push(Autofire._session.start(Autofire._session.currentState.startedAtUTC));
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-session-part', Autofire._session.currentState);
-	Autofire._helpers.checkSessionPart();
-	return isStored;
-};
+	Autofire._core.currentState.batch.header = this._core.header(
+		[],
+		{
+			platform	: Autofire._settings.platform,
+			os 			: Autofire._settings.os,
+			model 		: Autofire._settings.model,
+			locale 		: Autofire._settings.locale,
+			ver 		: version,
+			autofireVer : Autofire._settings.autofireVersion,
+			initTs		: Autofire._helpers.getCurrentTimestamp(true),
+			startLvl	: null
+		}
+	);
 
-// END
-Autofire.finishSession = function() {
-	var isInitializedState = Autofire._helpers.checkInitializedSession();
-	if (isInitializedState && isInitializedState !== true)
-		Autofire._session.makeHeaders(isInitializedState);
-	else if (isInitializedState !== true)
-		return false;
+	Autofire._core.currentState.gameId = gameId;
+	Autofire._core.currentState.uuid = playerId ? playerId : Autofire._helpers.getUUID();
+	Autofire._core.currentState.isInitialized = true;
 
-	var timestamp = Autofire._helpers.getCurrentTimestamp();
-	var duration = timestamp - Autofire._session.currentState.startedAtUTC;
-
-	Autofire._session.currentState.sessionPart.dataPoints.push(Autofire._session.end(timestamp, duration));
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-session-part', Autofire._session.currentState);
-	Autofire._helpers.checkSessionPart(true);
-	Autofire._helpers.persistenceDelete('autofire-current-session-part');
-	Autofire._helpers.persistenceDelete('autofire-isInitialized-stored');
-	Autofire._session.currentState.isInitialized = false;
-	return isStored;
+	return true;
 };
 
 // PROGRESS
-Autofire.progress = function() {
-	var isInitializedState = Autofire._helpers.checkInitializedSession();
-	if (isInitializedState && isInitializedState !== true)
-		Autofire._session.makeHeaders(isInitializedState);
-	else if (isInitializedState !== true)
+Autofire.progress = function(level, score) {
+	if (!Autofire._core.currentState.isInitialized)
 		return false;
 
-	Autofire._session.currentState.sessionPart.dataPoints.push(Autofire._session.progress());
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-session-part', Autofire._session.currentState);
-	Autofire._helpers.checkSessionPart();
-	return isStored;
-};
-
-Autofire.progressWithLevel = function(level) {
-	var isInitializedState = Autofire._helpers.checkInitializedSession();
-	if (isInitializedState && isInitializedState !== true)
-		Autofire._session.makeHeaders(isInitializedState);
-	else if (isInitializedState !== true)
-		return false;
-
-	Autofire._session.currentState.sessionPart.dataPoints.push(Autofire._session.progress(level));
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-session-part', Autofire._session.currentState);
-	Autofire._helpers.checkSessionPart();
-	return isStored;
-};
-
-Autofire.progressWithScore = function(score) {
-	var isInitializedState = Autofire._helpers.checkInitializedSession();
-	if (isInitializedState && isInitializedState !== true)
-		Autofire._session.makeHeaders(isInitializedState);
-	else if (isInitializedState !== true)
-		return false;
-
-	Autofire._session.currentState.sessionPart.dataPoints.push(Autofire._session.progress(false, score));
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-session-part', Autofire._session.currentState);
-	Autofire._helpers.checkSessionPart();
-	return isStored;
-};
-
-Autofire.progressWithLevelAndScore = function(level, score) {
-	var isInitializedState = Autofire._helpers.checkInitializedSession();
-	if (isInitializedState && isInitializedState !== true)
-		Autofire._session.makeHeaders(isInitializedState);
-	else if (isInitializedState !== true)
-		return false;
-
-	Autofire._session.currentState.sessionPart.dataPoints.push(Autofire._session.progress(level, score));
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-session-part', Autofire._session.currentState);
-	Autofire._helpers.checkSessionPart();
+	Autofire._core.currentState.batch.events.push(Autofire._core.progress(level, score));
+	Autofire._core.currentLvl = level;
+	var isStored = Autofire._helpers.persistenceWrite('autofire-current-batch', Autofire._core.currentState);
+	Autofire._helpers.checkBatch();
 	return isStored;
 };
 
 // MONETIZE
-Autofire.monetize = function() {
-	var isInitializedState = Autofire._helpers.checkInitializedSession();
-	if (isInitializedState && isInitializedState !== true)
-		Autofire._session.makeHeaders(isInitializedState);
-	else if (isInitializedState !== true)
+Autofire.monetize = function(name, ac, qty) {
+	if (!Autofire._core.currentState.isInitialized)
 		return false;
 
-	Autofire._session.currentState.sessionPart.dataPoints.push(Autofire._session.monetize());
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-session-part', Autofire._session.currentState);
-	Autofire._helpers.checkSessionPart();
+	Autofire._core.currentState.batch.events.push(Autofire._core.monetize(name, ac, qty));
+	var isStored = Autofire._helpers.persistenceWrite('autofire-current-batch', Autofire._core.currentState);
+	Autofire._helpers.checkBatch();
 	return isStored;
 };
 
-Autofire.monetizeWithItem = function(item) {
-	var isInitializedState = Autofire._helpers.checkInitializedSession();
-	if (isInitializedState && isInitializedState !== true)
-		Autofire._session.makeHeaders(isInitializedState);
-	else if (isInitializedState !== true)
+// RESOURCE
+Autofire.resource = function(name, qty) {
+	if (!Autofire._core.currentState.isInitialized)
 		return false;
 
-	Autofire._session.currentState.sessionPart.dataPoints.push(Autofire._session.monetize(item));
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-session-part', Autofire._session.currentState);
-	Autofire._helpers.checkSessionPart();
+	Autofire._core.currentState.batch.events.push(Autofire._core.resource(name, qty));
+	var isStored = Autofire._helpers.persistenceWrite('autofire-current-batch', Autofire._core.currentState);
+	Autofire._helpers.checkBatch();
 	return isStored;
-};
+}
 
-Autofire.monetizeWithVC = function(vc) {
-	var isInitializedState = Autofire._helpers.checkInitializedSession();
-	if (isInitializedState && isInitializedState !== true)
-		Autofire._session.makeHeaders(isInitializedState);
-	else if (isInitializedState !== true)
+// ACTION
+Autofire.action = function(what) {
+	if (!Autofire._core.currentState.isInitialized)
 		return false;
 
-	Autofire._session.currentState.sessionPart.dataPoints.push(Autofire._session.monetize(false, vc));
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-session-part', Autofire._session.currentState);
-	Autofire._helpers.checkSessionPart();
+	Autofire._core.currentState.batch.events.push(Autofire._core.action(what));
+	var isStored = Autofire._helpers.persistenceWrite('autofire-current-batch', Autofire._core.currentState);
+	Autofire._helpers.checkBatch();
 	return isStored;
-};
+}
 
-Autofire.monetizeWithItemAndVC = function(item, vc) {
-	var isInitializedState = Autofire._helpers.checkInitializedSession();
-	if (isInitializedState && isInitializedState !== true)
-		Autofire._session.makeHeaders(isInitializedState);
-	else if (isInitializedState !== true)
-		return false;
-
-	Autofire._session.currentState.sessionPart.dataPoints.push(Autofire._session.monetize(item, vc));
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-session-part', Autofire._session.currentState);
-	Autofire._helpers.checkSessionPart();
-	return isStored;
+// FLUSH
+Autofire.flush = function() {
+	var initTsSeconds = new Date(Autofire._core.currentState.batch.header[1].initTs).getTime() / 1000;
+	// if previous cached batches exists send them
+	Autofire._helpers.checkBatch(true);
+	return true;
 };
