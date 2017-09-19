@@ -88,9 +88,11 @@ Autofire._helpers = {
 
 	sendBucket: function(cachedBatchesKeys) {
 		var cachedBatch = JSON.parse(this.persistenceRead(cachedBatchesKeys[0]));
+		console.log('cachedBatch', cachedBatch);
 		var url = Autofire._settings.serviceURL;
 		var data = {
 			header 	: cachedBatch.batch.header,
+			tags	: cachedBatch.batch.tags,
 			events	: cachedBatch.batch.events
 		}
 		var requestBody = JSON.stringify(data);
@@ -102,6 +104,7 @@ Autofire._helpers = {
 		xhr.onload = function(e) {
 			if (xhr.readyState === 4) {
 				if (xhr.status === 200 || xhr.status === 400 || xhr.status === 404) { // 400 is malformed event. 404 Game Id not found. Remove it as sent.
+					console.log('xhr.responseText' ,xhr.responseText);
 					Autofire._helpers.persistenceDelete(cachedBatchesKeys[0]);
 					cachedBatchesKeys.shift();
 					if (cachedBatchesKeys.length > 0)
@@ -109,16 +112,17 @@ Autofire._helpers = {
 					else
 						Autofire._core.sending = false;
 				} else {
-					console.error(xhr.statusText);
+					console.error('error', xhr.statusText);
 					Autofire._core.sending = false;
 				}
 			}
 		};
 		xhr.onerror = function(e) {
-			console.error(xhr.statusText);
+			console.error(xhr);
 			Autofire._core.sending = false;
 		};
 		Autofire._core.sending = true;
+		console.log('requestBody', requestBody);
 		xhr.send(requestBody);
 	},
 
@@ -126,7 +130,7 @@ Autofire._helpers = {
 		var force = typeof force !== 'undefined' ? force : false;
 		var maxCachedBatches = 10;
 		var maxEvents = 3;
-		var interval = 600;
+		var interval = 120;
 
 		Autofire._core.currentState.totalEvents += 1;
 
@@ -138,20 +142,21 @@ Autofire._helpers = {
 				interval
 			) {
 
-			var storedCurrentBatch = JSON.parse(this.persistenceRead('autofire-current-batch'));
+			var storedCurrentBatch = JSON.parse(this.persistenceRead('autofire-current-batch-' + Autofire._core.currentState.gameId));
 			if (storedCurrentBatch && storedCurrentBatch.batch.events.length > 0)
 				this.persistenceWrite(
-					'autofire-cached_' + 'batch_' + this.getCurrentTimestamp(false),
+					'autofire-cached-batch-' + Autofire._core.currentState.gameId + '-' + this.getCurrentTimestamp(false),
 					storedCurrentBatch
 				);
-			if (Autofire._core.currentState.batch.header) // if the header hasn't been initialized (first load of init)
-				Autofire._core.currentState.batch.header[1].startLvl = Autofire._core.currentLvl; 	// last level from previous batch
-			Autofire._core.currentState.batch.events = [];								 			// empty the events
-			this.persistenceWrite('autofire-current-batch', Autofire._core.currentState); 			// save the new current state
+			if (Autofire._core.currentState.batch.header) // if the header hasn't been initialized (flush events on init)
+				Autofire._core.currentState.batch.header.atLevel = Autofire._core.currentLvl;	// last level from previous batch
+			Autofire._core.currentState.batch.events = [];								 		// empty the events
+			this.persistenceWrite('autofire-current-batch-' + Autofire._core.currentState.gameId, Autofire._core.currentState); 		// save the new current state
 
 			// if the cached batches are more than the maximum allowed
-			var cachedBatchesKeys = this.persistenceRead('autofire-cached', true);
+			var cachedBatchesKeys = this.persistenceRead('autofire-cached-batch-' + Autofire._core.currentState.gameId, true);
 			cachedBatchesKeys.sort();
+			console.log('cachedBatchesKeys', cachedBatchesKeys);
 			if (cachedBatchesKeys.length > maxCachedBatches) {
 				var oldestbatch = cachedBatchesKeys.shift();
 				this.persistenceDelete(oldestbatch);
@@ -204,7 +209,7 @@ Autofire._helpers = {
 			};
 
 			return now.getFullYear()
-				+ '-' + pad(now.getMonth()+1)
+				+ '-' + pad(now.getMonth() + 1)
 				+ '-' + pad(now.getDate())
 				+ 'T' + pad(now.getHours())
 				+ ':' + pad(now.getMinutes())
@@ -244,25 +249,29 @@ Autofire._helpers = {
 }
 
 Autofire._settings = {
-	platform		: 'Javascript-Web',
 	autofireVersion	: '0.4',
+	platform		: 'Javascript-Web',
 	os				: Autofire._helpers.getOs(),
 	model			: Autofire._helpers.getModel(),
 	locale			: Autofire._helpers.getLocale(),
-	//serviceURL	: 'https://service.autofire.io/v1/games/players/datapoints'
-	serviceURL		: 'http://putsreq.com/Foy3mZhbjMD7mcXZXwjx'
+	serviceURL		: 'https://service.autofire.io/api/v1/command/clients/datapoints'
 }
 
 Autofire._core = {
 
 	// HEADER
-	header: function(tags, nominalDict) {
-		return [tags, nominalDict];
+	header: function(nominals) {
+		return nominals;
 	},
 
 	// EVENTS
-	event: function(name, timestamp, nominalDict, ordinalDict, scaleDict) {
-		return [name, timestamp, nominalDict, ordinalDict, scaleDict];
+	event: function(name, timestamp, nominals, integrals, fractionals) {
+		return [name, timestamp, nominals, integrals, fractionals];
+	},
+
+	init: function() {
+		var timestamp = Autofire._helpers.getCurrentTimestamp(true);
+		return this.event('INIT', timestamp, {}, {}, {});
 	},
 
 	progress: function(level, score) {
@@ -296,6 +305,7 @@ Autofire._core = {
 		totalEvents		: 0,
 		batch 			: {
 			header 		: null,
+			tags		: [],
 			events 		: []
 		}
 	}
@@ -308,26 +318,26 @@ Autofire.init = function(gameId, version, playerId) {
 
 	var playerId = typeof playerId != 'undefined' ? playerId : false;
 
-	// if previous data exists send them
+	// if previous data exists send them now
 	Autofire._helpers.checkBatch(true);
 
 	Autofire._core.currentState.batch.header = this._core.header(
-		[],
 		{
-			platform	: Autofire._settings.platform,
-			os 			: Autofire._settings.os,
-			model 		: Autofire._settings.model,
-			locale 		: Autofire._settings.locale,
-			ver 		: version,
-			autofireVer : Autofire._settings.autofireVersion,
-			initTs		: Autofire._helpers.getCurrentTimestamp(true),
-			startLvl	: null
+			autofireVersion : Autofire._settings.autofireVersion,
+			platform		: Autofire._settings.platform,
+			os 				: Autofire._settings.os,
+			model 			: Autofire._settings.model,
+			locale 			: Autofire._settings.locale,
+			version 		: version,
+			initTimestamp	: Autofire._helpers.getCurrentTimestamp(true),
+			atLevel			: null
 		}
 	);
 
 	Autofire._core.currentState.gameId = gameId;
 	Autofire._core.currentState.uuid = playerId ? playerId : Autofire._helpers.getUUID();
 	Autofire._core.currentState.isInitialized = true;
+	Autofire._core.currentState.batch.events.push(Autofire._core.init());
 
 	return true;
 };
@@ -339,7 +349,7 @@ Autofire.progress = function(level, score) {
 
 	Autofire._core.currentState.batch.events.push(Autofire._core.progress(level, score));
 	Autofire._core.currentLvl = level;
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-batch', Autofire._core.currentState);
+	var isStored = Autofire._helpers.persistenceWrite('autofire-current-batch-' + Autofire._core.currentState.gameId, Autofire._core.currentState);
 	Autofire._helpers.checkBatch();
 	return isStored;
 };
@@ -350,7 +360,7 @@ Autofire.monetize = function(name, ac, qty) {
 		return false;
 
 	Autofire._core.currentState.batch.events.push(Autofire._core.monetize(name, ac, qty));
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-batch', Autofire._core.currentState);
+	var isStored = Autofire._helpers.persistenceWrite('autofire-current-batch-' + Autofire._core.currentState.gameId, Autofire._core.currentState);
 	Autofire._helpers.checkBatch();
 	return isStored;
 };
@@ -361,7 +371,7 @@ Autofire.resource = function(name, qty) {
 		return false;
 
 	Autofire._core.currentState.batch.events.push(Autofire._core.resource(name, qty));
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-batch', Autofire._core.currentState);
+	var isStored = Autofire._helpers.persistenceWrite('autofire-current-batch-' + Autofire._core.currentState.gameId, Autofire._core.currentState);
 	Autofire._helpers.checkBatch();
 	return isStored;
 }
@@ -372,14 +382,21 @@ Autofire.action = function(what) {
 		return false;
 
 	Autofire._core.currentState.batch.events.push(Autofire._core.action(what));
-	var isStored = Autofire._helpers.persistenceWrite('autofire-current-batch', Autofire._core.currentState);
+	var isStored = Autofire._helpers.persistenceWrite('autofire-current-batch-' + Autofire._core.currentState.gameId, Autofire._core.currentState);
 	Autofire._helpers.checkBatch();
 	return isStored;
 }
 
 // FLUSH
 Autofire.flush = function() {
-	var initTsSeconds = new Date(Autofire._core.currentState.batch.header[1].initTs).getTime() / 1000;
+	var initTimestampSeconds = new Date(Autofire._core.currentState.batch.header.initTimestamp).getTime() / 1000;
+	console.log(
+		'Total events: ' +
+		Autofire._core.currentState.totalEvents +
+		' in ' +
+		(Autofire._helpers.getCurrentTimestamp(false) - initTimestampSeconds) +
+		' seconds'
+	);
 	// if previous cached batches exists send them
 	Autofire._helpers.checkBatch(true);
 	return true;
