@@ -1,6 +1,6 @@
 ![Autofire logo](http://autofire.io/wp-content/themes/autofire/img/logo_ext.png)
 
-#Autofire | JavaScript Web SDK
+# Autofire | JavaScript Web SDK
 
 This is the JavaScript Web SDK for the **Autofire** - Game Analytics service.
 
