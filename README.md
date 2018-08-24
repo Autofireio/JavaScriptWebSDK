@@ -2,7 +2,7 @@
 
 # Autofire | JavaScript Web SDK
 
-This is the JavaScript Web SDK for the **Autofire** - Game Analytics service.
+This is the JavaScript Web SDK for the **Autofire** - Game Optimization service.
 
 ## Get Started
 
