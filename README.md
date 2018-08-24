@@ -6,8 +6,8 @@ This is the JavaScript Web SDK for the **Autofire** - Game Analytics service.
 
 ## Get Started
 
-Visit our [documention](https://autofire.io/documentation/sdk/get-started-sdk/?platform=javascript_web) to get started in a few minutes!
+Visit our [documention](https://autofire.io/documentation/sdk/javascript.html) to get started in a few minutes!
 
 ---
 
-Copyright (c) 2017 Autofire - Game Analytics | <http://autofire.io>
+Copyright (c) 2018 Autofire - Game Optimization | <http://autofire.io>
