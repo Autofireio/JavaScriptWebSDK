@@ -1,5 +1,3 @@
-![Autofire logo](http://autofire.io/img/logo_ext.png)
-
 # Autofire | JavaScript Web SDK
 
 This is the JavaScript Web SDK for the **Autofire** - Game Optimization service.
